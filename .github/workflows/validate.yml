@@ -29,6 +29,6 @@ jobs:
           print('frontmatter OK:', d)
           EOF
       - name: Typecheck
-        run: npx --yes typescript@5 tsc --noEmit
+        run: npm ci --no-audit --no-fund && ./node_modules/.bin/tsc --noEmit
       - name: Unit tests
-        run: npm test --if-present
+        run: npm test
