@@ -11,6 +11,10 @@ export interface LoopConfig {
   itemTimeoutMs?: number;
   /** Optional: Direct array of input data instead of loading from a file */
   inputData?: any[];
+  /** Optional: progress callback, invoked every `progressEvery` settled items (and once at the end) */
+  onProgress?: (done: number, total: number) => void;
+  /** Items between onProgress calls (default: 100) */
+  progressEvery?: number;
 }
 
 export type ItemStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'awaiting_agent';
@@ -24,11 +28,15 @@ export interface BatchItem<T = any> {
   pendingPrompt?: any;
   output?: any;
   logs?: string[];
+  /** Count of oldest log entries dropped by the per-item log cap (100k-scale bound) */
+  logsDropped?: number;
 }
 
 export interface Checkpoint<T = any> {
   jobId: string;
   startTime: string;
+  /** Schema version of this checkpoint file (old files without it load as 0) */
+  stateVersion: number;
   items: BatchItem<T>[];
   completedCount: number;
   failedCount: number;

@@ -5,6 +5,9 @@ import { Logger } from './logger.js';
 import { AgentBridgeError } from './llm.js';
 
 export class LoopEngine<T = any> {
+    // ponytail: fixed bounds for 100k-scale — per-item log cap (checkpoint stays O(items), not O(items × logs)).
+    private static readonly MAX_ITEM_LOGS = 20;
+    private static readonly STATE_VERSION = 1;
     private config: LoopConfig;
     private logger: Logger;
     private checkpoint: Checkpoint<T>;
@@ -27,7 +30,12 @@ export class LoopEngine<T = any> {
     private loadCheckpoint(): Checkpoint<T> {
         if (fs.existsSync(this.config.checkpointPath)) {
             this.logger.log('Resuming from checkpoint...');
-            return JSON.parse(fs.readFileSync(this.config.checkpointPath, 'utf-8'));
+            const loaded = JSON.parse(fs.readFileSync(this.config.checkpointPath, 'utf-8')) as Checkpoint<T>;
+            // Backward compat: checkpoints written before stateVersion exist load as version 0.
+            if (loaded.stateVersion === undefined) loaded.stateVersion = 0;
+            this.checkpoint = loaded;
+            this.recount();
+            return this.checkpoint;
         }
 
         this.logger.log('Starting new job...');
@@ -42,6 +50,7 @@ export class LoopEngine<T = any> {
         return {
             jobId: `job-${Date.now()}`,
             startTime: new Date().toISOString(),
+            stateVersion: LoopEngine.STATE_VERSION,
             items: inputData.map((item: T, index: number) => ({
                 id: `item-${index}`,
                 data: item,
@@ -54,8 +63,44 @@ export class LoopEngine<T = any> {
         };
     }
 
+    /** Recompute counters from item states — the single source of truth, so a
+     *  resume after a crash can never double-count (persisted counters are ignored). */
+    private recount(): void {
+        const maxRetries = this.config.maxRetries || 3;
+        this.checkpoint.completedCount = this.checkpoint.items.filter(i => i.status === 'completed').length;
+        this.checkpoint.failedCount = this.checkpoint.items.filter(i => i.status === 'failed' && i.attempts >= maxRetries).length;
+    }
+
     private saveCheckpoint() {
-        fs.writeFileSync(this.config.checkpointPath, JSON.stringify(this.checkpoint, null, 2));
+        // Atomic write: tmp + rename, so a crash mid-write never leaves partial JSON.
+        const tmpPath = `${this.config.checkpointPath}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify(this.checkpoint, null, 2));
+        fs.renameSync(tmpPath, this.config.checkpointPath);
+    }
+
+    // Drain API choice: listAwaiting() + resolveAwaiting(id, result) instead of a
+    // single drainAgentQueue(handler), so a human/agent can inspect parked prompts
+    // first and resolve items one by one (with a result => completed, without => requeue).
+    /** Parked items waiting on the agent, with their pending prompts. */
+    listAwaiting(): BatchItem<T>[] {
+        return this.checkpoint.items.filter(i => i.status === 'awaiting_agent');
+    }
+
+    /** Resolve one parked item. With a result it completes; without, it requeues for the next run(). Returns false when the id is unknown or not parked. */
+    resolveAwaiting(id: string, result?: unknown): boolean {
+        const item = this.checkpoint.items.find(i => i.id === id && i.status === 'awaiting_agent');
+        if (!item) return false;
+        if (result !== undefined) {
+            item.status = 'completed';
+            item.output = result;
+            delete item.pendingPrompt;
+        } else {
+            item.status = 'pending';
+            delete item.pendingPrompt;
+        }
+        this.recount();
+        this.saveCheckpoint();
+        return true;
     }
 
     async run(worker: WorkerFunction<T>) {
@@ -70,6 +115,15 @@ export class LoopEngine<T = any> {
 
         const concurrency = this.config.concurrency || 1;
         const activePromises: Promise<void>[] = [];
+        const total = this.checkpoint.items.length;
+        const every = this.config.progressEvery || 100;
+        let settled = 0;
+        const report = () => {
+            settled++;
+            if (this.config.onProgress && (settled % every === 0 || settled === pendingItems.length)) {
+                this.config.onProgress(settled, total);
+            }
+        };
 
         for (const item of pendingItems) {
             // Wait if we reached concurrency limit
@@ -78,6 +132,7 @@ export class LoopEngine<T = any> {
             }
 
             const promise = this.processItem(item, worker).then(() => {
+                report();
                 // Remove self from active promises
                 const index = activePromises.indexOf(promise);
                 if (index > -1) activePromises.splice(index, 1);
@@ -127,6 +182,11 @@ export class LoopEngine<T = any> {
                 this.logger.log(`[${item.id}] ${msg}`);
                 item.logs = item.logs || [];
                 item.logs.push(msg);
+                // 100k-scale bound: keep the newest entries, count the dropped oldest.
+                if (item.logs.length > LoopEngine.MAX_ITEM_LOGS) {
+                    item.logs.shift();
+                    item.logsDropped = (item.logsDropped || 0) + 1;
+                }
             }
         };
 

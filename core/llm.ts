@@ -1,5 +1,5 @@
 import * as https from 'https';
-import * as dotenv from 'dotenv';
+import * as http from 'http';
 
 export interface LLMConfig {
     /** Override the API Key. Defaults to process.env.OPENAI_API_KEY, ANTHROPIC_API_KEY, etc. */
@@ -23,8 +23,8 @@ export class LLMClient {
     private model: string;
 
     constructor(config: LLMConfig = {}) {
-        // Load .env from the project root (where the command is run)
-        dotenv.config();
+        // stdlib only: read credentials straight from the environment.
+        // No dotenv — zero-dependency claim stays true; callers load .env themselves if needed.
 
         // Automatically detect environment credentials
         this.apiKey = config.apiKey ||
@@ -70,9 +70,9 @@ export class LLMClient {
         };
 
         const executeRequest = () => new Promise<string>((resolve, reject) => {
-            const req = https.request(url, options, (res) => {
+            const req = https.request(url, options, (res: http.IncomingMessage) => {
                 let data = '';
-                res.on('data', (chunk) => data += chunk);
+                res.on('data', (chunk: Buffer | string) => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode === 429 || (res.statusCode && res.statusCode >= 500)) {
                         reject(new Error(`RATE_LIMIT_OR_SERVER_ERROR:${res.statusCode}`));
@@ -92,7 +92,7 @@ export class LLMClient {
                 });
             });
 
-            req.on('error', (e) => reject(e));
+            req.on('error', (e: Error) => reject(e));
             req.write(body);
             req.end();
         });

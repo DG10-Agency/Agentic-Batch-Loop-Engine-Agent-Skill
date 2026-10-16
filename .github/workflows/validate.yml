@@ -1,0 +1,34 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Assert SKILL.md frontmatter
+        run: |
+          python3 - <<'EOF'
+          import re
+          src = open('SKILL.md', encoding='utf-8').read()
+          assert src.startswith('---'), 'frontmatter must start at byte 0'
+          m = re.match(r'^---\n(.*?)\n---\n', src, re.S)
+          assert m, 'frontmatter must close with \\n---\\n'
+          head = m.group(1)
+          for field in ('name:', 'description:', 'version:', 'author:', 'license:', 'platforms:'):
+              assert field in head, f'missing frontmatter field {field}'
+          d = re.search(r'^description:\s*(.+)$', head, re.M).group(1).strip()
+          assert len(d) <= 60, f'description too long ({len(d)} chars)'
+          assert d.endswith('.'), 'description must end with a period'
+          print('frontmatter OK:', d)
+          EOF
+      - name: Typecheck
+        run: npx --yes typescript@5 tsc --noEmit
+      - name: Unit tests
+        run: npm test --if-present

@@ -1,0 +1,8 @@
+{
+  "name": "agentic-batch-loop-engine",
+  "version": "0.1.0",
+  "description": "Fault-tolerant batch loop engine for long agent jobs.",
+  "author": "shubham-dg10 (https://github.com/shubham-dg10)",
+  "license": "MIT",
+  "repository": "https://github.com/DG10-Agency/Agentic-Batch-Loop-Engine-by-DG10.Agency"
+}

@@ -1,12 +1,13 @@
 {
   "name": "agentic-batch-loop-engine",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "The fault-tolerant loop engine for running massive, multi-step AI agent workflows (SEO, Data, Scraping) without timeouts or memory leaks.",
   "main": "dist/core/engine.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/core/engine.js",
-    "example:features": "tsx examples/feature-pages/run.ts"
+    "example:features": "tsx examples/feature-pages/run.ts",
+    "test": "tsc --noEmit && tsc && node test/semantic-check.js && node test/resilience-check.js"
   },
   "keywords": [
     "ai-agent",
@@ -18,8 +19,11 @@
     "automation",
     "loop"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "shubham-dg10",
+  "license": "MIT",
   "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
 }
