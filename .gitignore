@@ -4,3 +4,8 @@ checkpoint.json
 *.log
 output/
 .DS_Store
+
+test/tmp/
+checkpoint*.json
+*.log
+output/
